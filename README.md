@@ -310,6 +310,38 @@ save_embeddings(embeddings, "embeddings.json")
 ## Vector Store Implementation
 Since we are not using any python libraries for vector storage, we will implement a simple vector store using a dictionary.
 
+### Faiss Vector Store Implementation (Optional Enhancement)
+
+For improved performance and scalability with large datasets, we've also implemented a Faiss-based vector store. Faiss is Facebook AI's library for efficient similarity search and clustering of dense vectors. This implementation offers several advantages over the simple dictionary-based approach:
+
+1. **Efficient Similarity Search**: Utilizes optimized algorithms for fast nearest neighbor search
+2. **Scalability**: Handles large-scale vector datasets more effectively
+3. **Memory Efficiency**: Provides various indexing strategies to balance speed and memory usage
+4. **GPU Acceleration**: Supports GPU acceleration for even faster computations (when using faiss-gpu)
+
+The Faiss implementation can be found in `rl4rag/faissStoreUtils.py` and includes functions for:
+- Adding embeddings to the Faiss index
+- Performing similarity search using Faiss
+- Saving and loading Faiss indexes to/from disk
+- Retrieving relevant chunks with Faiss-based search
+
+To use the Faiss implementation instead of the dictionary-based one, simply replace imports and function calls:
+- Replace `from storeUtils import ...` with `from faissStoreUtils import ...`
+- Replace `add_to_vector_store()` with `add_to_faiss_store()`
+- Replace `retrieve_relevant_chunks()` with `retrieve_relevant_chunks_faiss()`
+
+#### Compatibility Notes
+
+Please note that Faiss may have compatibility issues with newer versions of NumPy (2.x). If you encounter import errors, you may need to downgrade NumPy to version 1.x:
+
+```bash
+pip install "numpy<2.0"
+```
+
+This is a known issue with Faiss and NumPy 2.x compatibility. The Faiss team is working on resolving this in future releases.
+
+After installing the correct version of NumPy, you should be able to use all Faiss functionalities including GPU acceleration (if you have installed `faiss-gpu`).
+
 
 ```python
 # Initialize an in-memory vector store as a dictionary
