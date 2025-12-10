@@ -1,6 +1,5 @@
 '''
     TODO List
-    引入fassi，使用fassi存储数据，而不是vector。
     价值函数存在较大问题，如何正确使用价值函数判断？（能否使用fassi计算？）
     使用grpo实现rl
 '''
@@ -11,7 +10,7 @@ from openai import OpenAI
 import numpy as np
 import json
 from typing import Dict, List, Tuple, Optional, Union
-from storeUtils import *
+from faissStoreUtils import *
 from llmUtils import *
 from pipelines import *
 
@@ -158,7 +157,7 @@ def expand_context(query: str, current_chunks: List[str], top_k: int = 3) -> Lis
         List[str]: The expanded list of context chunks including new unique chunks.
     """
     # Retrieve more chunks than currently available
-    additional_chunks = retrieve_relevant_chunks(query, top_k=top_k + len(current_chunks))
+    additional_chunks = retrieve_relevant_chunks_faiss(query, top_k=top_k + len(current_chunks))
     
     # Filter out chunks that are already in the current context
     new_chunks = []
@@ -277,7 +276,7 @@ def rl_step(
         rewritten_query: str = rewrite_query(state["original_query"], state["context"])
         state["current_query"] = rewritten_query  # Update the current query in the state
         # Retrieve new context based on the rewritten query
-        new_context: List[str] = retrieve_relevant_chunks(rewritten_query)
+        new_context: List[str] = retrieve_relevant_chunks_faiss(rewritten_query)
         state["context"] = new_context  # Update the context in the state
 
     elif action == "expand_context":
@@ -420,7 +419,7 @@ def training_loop(
     # Start the training loop
     for episode in range(params["num_episodes"]):
         # Reset the environment with the same query
-        context_chunks: List[str] = retrieve_relevant_chunks(query_text)
+        context_chunks: List[str] = retrieve_relevant_chunks_faiss(query_text)
         state: Dict[str, object] = define_state(query_text, context_chunks)
         episode_reward: float = 0  # Initialize the reward for the current episode
         episode_actions: List[str] = []  # Initialize the list of actions for the current episode
@@ -496,7 +495,7 @@ def compare_rag_approaches(query_text: str, ground_truth: str) -> Tuple[str, str
     # Initialize training parameters (e.g., learning rate, number of episodes, discount factor).
     params: Dict[str, float | int] = initialize_training_params()
     # Set the number of episodes to a smaller value for demonstration purposes.
-    params["num_episodes"] = 10
+    params["num_episodes"] = 5
     
     # Run the training loop for the RL-enhanced RAG model.
     # This loop trains the model to optimize its responses using reinforcement learning.

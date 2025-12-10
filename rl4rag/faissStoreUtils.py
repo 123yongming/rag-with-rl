@@ -191,3 +191,25 @@ def load_faiss_index(file_path: str) -> None:
     # Load the chunks from the JSON file
     with open(f"{file_path}_chunks.json", 'r', encoding='utf-8') as f:
         faiss_chunks = json.load(f)
+
+
+# Function to compute cosine similarity between two vectors
+def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    """
+    Compute the cosine similarity between two vectors.
+
+    Args:
+        vec1 (np.ndarray): The first vector.
+        vec2 (np.ndarray): The second vector.
+
+    Returns:
+        float: The cosine similarity between the two vectors, ranging from -1 to 1.
+    """
+    # Compute the dot product of the two vectors
+    dot_product = np.dot(vec1, vec2)
+    # Compute the magnitude (norm) of the first vector
+    norm_vec1 = np.linalg.norm(vec1)
+    # Compute the magnitude (norm) of the second vector
+    norm_vec2 = np.linalg.norm(vec2)
+    # Return the cosine similarity as the ratio of the dot product to the product of the norms
+    return dot_product / (norm_vec1 * norm_vec2)
