@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple, Optional, Union
 from config import *
 from dataUtils import *
 from embeddingUtils import *
-from storeUtils import *
+from faissStoreUtils import *
 from pipelines import *
 from basicRl import *
 
@@ -35,13 +35,11 @@ print(preprocessed_chunks[0:2])
 print(embeddings[0:2])
 
 
-# 存储embedding文件
-# Add the generated embeddings and their corresponding preprocessed chunks to the vector store
-add_to_vector_store(embeddings, preprocessed_chunks)
+add_to_faiss_store(embeddings, preprocessed_chunks)
 # Define a query text for which we want to retrieve relevant document chunks
 query_text = "What is Quantum Computing?"
 # Retrieve the most relevant chunks from the vector store based on the query text
-relevant_chunks = retrieve_relevant_chunks(query_text)
+relevant_chunks = retrieve_relevant_chunks_faiss(query_text)
 # Print the first 50 characters of each retrieved relevant chunk
 for idx, chunk in enumerate(relevant_chunks):
     print(f"Chunk {idx + 1}: {chunk[:50]} ... ")
