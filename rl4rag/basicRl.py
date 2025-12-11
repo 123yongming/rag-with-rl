@@ -1,6 +1,6 @@
 '''
     TODO List
-    价值函数存在较大问题，如何正确使用价值函数判断？（能否使用fassi计算？）
+    整理目前的价值函数实现
     使用grpo实现rl
 '''
 
@@ -13,6 +13,20 @@ from typing import Dict, List, Tuple, Optional, Union
 from faissStoreUtils import *
 from llmUtils import *
 from pipelines import *
+
+# 导入高级奖励系统
+try:
+    from advanced_reward_system import (
+        AdvancedRewardCalculator, 
+        RewardConfig, 
+        create_advanced_reward_calculator,
+        REWARD_CONFIGS,
+        integrate_with_basic_rl
+    )
+    ADVANCED_REWARD_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import advanced reward system: {e}")
+    ADVANCED_REWARD_AVAILABLE = False
 
 # Function to define the state representation for reinforcement learning
 def define_state(
@@ -67,28 +81,95 @@ def define_action_space() -> List[str]:
 
 
 # Function to calculate the reward based on response quality
-def calculate_reward(response: str, ground_truth: str) -> float:
+def calculate_reward(
+    response: str = None, 
+    ground_truth: str = None, 
+    env_state: dict = None, 
+    action: str = None, 
+    feedback_result: dict = None
+) -> float:
     """
-    Calculate a reward value by comparing the generated response to the ground truth.
-    
-    Uses cosine similarity between the embeddings of the response and ground truth
-    to determine how close the response is to the expected answer.
+    Calculate a reward value using the advanced reward system.
     
     Args:
         response (str): The generated response from the RAG pipeline.
         ground_truth (str): The expected correct answer.
+        env_state (dict): The current environment state containing query, context, etc.
+        action (str): The action that was taken in the environment.
+        feedback_result (dict): Additional feedback from the environment.
     
     Returns:
-        float: A reward value between -1 and 1, where higher values indicate 
-               greater similarity to the ground truth.
+        float: A reward value in the range [-1, 1].
+        
+    Raises:
+        ValueError: If advanced reward system is not available or required parameters are missing.
+        RuntimeError: If advanced reward system calculation fails.
     """
-    # Generate embeddings for both the response and ground truth
-    response_embedding = generate_embeddings([response])[0]
-    ground_truth_embedding = generate_embeddings([ground_truth])[0]
+    # Check if advanced reward system is available
+    if not ADVANCED_REWARD_AVAILABLE:
+        raise RuntimeError("Advanced reward system is not available. Please ensure it's properly configured.")
     
-    # Calculate cosine similarity between the embeddings as the reward
-    similarity = cosine_similarity(response_embedding, ground_truth_embedding)
-    return similarity
+    # Validate required parameters for advanced reward calculation
+    if env_state is None:
+        raise ValueError("env_state is required for advanced reward calculation")
+    if action is None:
+        raise ValueError("action is required for advanced reward calculation")
+    if response is None:
+        raise ValueError("response is required for advanced reward calculation")
+    if ground_truth is None:
+        raise ValueError("ground_truth is required for advanced reward calculation")
+    
+    try:
+        # Get the advanced reward calculator
+        calculator = _get_advanced_calculator()
+        if calculator is None:
+            raise RuntimeError("Advanced reward calculator could not be initialized")
+        
+        # Prepare reward input data
+        reward_input = {
+            'query': env_state.get('query', ''),
+            'context': env_state.get('context', []),
+            'response': response,
+            'ground_truth': ground_truth,
+            'action': action,
+            'retrieval_results': env_state.get('retrieval_results', []),
+            'generation_results': env_state.get('generation_results', []),
+            'feedback': feedback_result or {}
+        }
+        
+        # Extract parameters for advanced system
+        query = reward_input.get('query', '')
+        context = reward_input.get('context', [])
+        response_text = reward_input.get('response', '')
+        ground_truth_text = reward_input.get('ground_truth', '')
+        action_str = reward_input.get('action', '')
+        
+        # Calculate comprehensive reward using advanced system
+        result = calculator.calculate_comprehensive_reward(
+            query=query,
+            retrieved_chunks=context,
+            response=response_text,
+            ground_truth=ground_truth_text,
+            state=env_state,
+            action=action_str,
+            step_number=1,  # Default step number
+            is_final_step=False  # Default to non-final step
+        )
+        
+        # Extract the overall reward
+        overall_reward = result.get('overall_reward', 0.0)
+        
+        # Convert to [-1, 1] range to maintain compatibility with existing system
+        # Advanced system typically returns [0, 1], so we transform it
+        normalized_reward = (overall_reward - 0.5) * 2.0
+        
+        return max(-1.0, min(1.0, normalized_reward))
+        
+    except Exception as e:
+        # Log the error and raise a more descriptive exception
+        error_msg = f"Advanced reward calculation failed: {str(e)}"
+        print(error_msg)
+        raise RuntimeError(error_msg) from e
 
 # Function to rewrite the query for better document retrieval
 def rewrite_query(
@@ -268,7 +349,7 @@ def rl_step(
     # Select an action using the policy network
     action: str = policy_network(state, action_space)
     response: str = None  # Initialize response as None
-    reward: float = 0  # Initialize reward as 0
+    reward: float = 0.0  # Initialize reward as 0.0 (浮点数)
 
     # Execute the selected action
     if action == "rewrite_query":
@@ -295,7 +376,19 @@ def rl_step(
         # Generate a response using the LLM
         response: str = generate_response(prompt)
         # Calculate the reward based on the similarity between the response and the ground truth
-        reward: float = calculate_reward(response, ground_truth)
+        # Create env_state for reward calculation
+        env_state = {
+            'query': state.get("current_query", ""),
+            'context': state.get("context", []),
+            'retrieval_results': state.get("context", []),
+            'previous_rewards': state.get("previous_rewards", [])
+        }
+        reward: float = calculate_reward(
+            response=response,
+            ground_truth=ground_truth,
+            env_state=env_state,
+            action=action
+        )
         # Update the state with the new response and reward
         state["previous_responses"].append(response)
         state["previous_rewards"].append(reward)
@@ -413,7 +506,20 @@ def training_loop(
     
     # Get initial performance from the simple RAG pipeline for comparison
     simple_response: str = basic_rag_pipeline(query_text)
-    simple_reward: float = calculate_reward(simple_response, ground_truth)
+    # Get context for simple RAG to create proper env_state
+    simple_context = retrieve_relevant_chunks_faiss(query_text)
+    simple_env_state = {
+        'query': query_text,
+        'context': simple_context,
+        'retrieval_results': simple_context,
+        'previous_rewards': []
+    }
+    simple_reward: float = calculate_reward(
+        response=simple_response,
+        ground_truth=ground_truth,
+        env_state=simple_env_state,
+        action='generate_response'
+    )
     print(f"Simple RAG reward: {simple_reward:.4f}")
 
     # Start the training loop
@@ -421,7 +527,7 @@ def training_loop(
         # Reset the environment with the same query
         context_chunks: List[str] = retrieve_relevant_chunks_faiss(query_text)
         state: Dict[str, object] = define_state(query_text, context_chunks)
-        episode_reward: float = 0  # Initialize the reward for the current episode
+        episode_reward: float = 0.0  # Initialize the reward for the current episode (浮点数)
         episode_actions: List[str] = []  # Initialize the list of actions for the current episode
         
         # Maximum number of steps per episode to prevent infinite loops
@@ -482,8 +588,23 @@ def compare_rag_approaches(query_text: str, ground_truth: str) -> Tuple[str, str
     # Step 1: Generate a response using the simple RAG pipeline
     # The basic RAG pipeline retrieves relevant chunks and generates a response without reinforcement learning.
     simple_response: str = basic_rag_pipeline(query_text)
+    
+    # Get context for simple RAG to create proper env_state
+    simple_context = retrieve_relevant_chunks_faiss(query_text)
+    simple_env_state = {
+        'query': query_text,
+        'context': simple_context,
+        'retrieval_results': simple_context,
+        'previous_rewards': []
+    }
+    
     # Calculate the similarity score between the simple RAG response and the ground truth.
-    simple_similarity: float = calculate_reward(simple_response, ground_truth)
+    simple_similarity: float = calculate_reward(
+        response=simple_response,
+        ground_truth=ground_truth,
+        env_state=simple_env_state,
+        action='generate_response'
+    )
     
     print("\nSimple RAG Output:")
     print("-" * 40)
@@ -513,7 +634,19 @@ def compare_rag_approaches(query_text: str, ground_truth: str) -> Tuple[str, str
         best_rl_response: str = generate_response(prompt)
     
     # Calculate the similarity score between the RL-enhanced RAG response and the ground truth.
-    rl_similarity: float = calculate_reward(best_rl_response, ground_truth)
+    rl_context = retrieve_relevant_chunks_faiss(query_text)
+    rl_env_state = {
+        'query': query_text,
+        'context': rl_context,
+        'retrieval_results': rl_context,
+        'previous_rewards': []
+    }
+    rl_similarity: float = calculate_reward(
+        response=best_rl_response,
+        ground_truth=ground_truth,
+        env_state=rl_env_state,
+        action='generate_response'
+    )
     
     print("\nRL-enhanced RAG Output:")
     print("-" * 40)
@@ -548,3 +681,22 @@ def compare_rag_approaches(query_text: str, ground_truth: str) -> Tuple[str, str
     
     # Return the results: responses and similarity scores for both approaches.
     return simple_response, best_rl_response, simple_similarity, rl_similarity
+
+
+# 初始化高级奖励计算器
+_global_advanced_calculator = None
+
+def _get_advanced_calculator():
+    """获取全局高级奖励计算器实例"""
+    global _global_advanced_calculator
+    if _global_advanced_calculator is None and ADVANCED_REWARD_AVAILABLE:
+        config = REWARD_CONFIGS.get('balanced', RewardConfig())
+        _global_advanced_calculator = create_advanced_reward_calculator({
+            'relevance_weight': 0.3,
+            'coverage_weight': 0.2,
+            'accuracy_weight': 0.25,
+            'fluency_weight': 0.1,
+            'completeness_weight': 0.15,
+            'bias_correction': True
+        })
+    return _global_advanced_calculator
