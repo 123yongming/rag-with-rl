@@ -627,7 +627,7 @@ def compare_rag_approaches(query_text: str, ground_truth: str) -> Tuple[str, str
     # If no response was generated during training, generate one using the current query and context.
     if best_rl_response is None:
         # Retrieve relevant chunks for the query.
-        context_chunks: List[str] = retrieve_relevant_chunks(query_text)
+        context_chunks: List[str] = retrieve_relevant_chunks_faiss(query_text)
         # Construct a prompt using the query and retrieved context.
         prompt: str = construct_prompt(query_text, context_chunks)
         # Generate a response using the language model.
